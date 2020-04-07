@@ -9,12 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/spiffe/go-spiffe/v2/bundle/spiffebundle"
 	"github.com/spiffe/go-spiffe/v2/federation"
 	"github.com/spiffe/go-spiffe/v2/logger"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
+	"github.com/stretchr/testify/require"
 )
 
 const jwks = `{
@@ -40,15 +39,16 @@ const jwks = `{
     ]
 }`
 
-// TODO: it is a temporal test, I'll create a real suite, once we have `workloadapi.BundleSource` implemented
 func TestHandler(t *testing.T) {
-	trustDomain := spiffeid.TrustDomain{Id: "example.org"}
-	//
-	//trustDomain, err := spiffeid.TrustDomainFromString("example.org")
-	//require.NoError(t, err)
+	trustDomain, err := spiffeid.TrustDomainFromString("test.domain")
+	require.NoError(t, err)
 
-	// TODO: remplace with valid load
-	jwksByte := []byte(jwks)
+	bundle, err := spiffebundle.Parse(trustDomain, []byte(jwks))
+	require.NoError(t, err)
+
+	//invalidBundle := spiffebundle.New(trustDomain)
+	//invalidBundle.Marshal()
+
 	writer := new(bytes.Buffer)
 	source := &fakeSource{}
 
@@ -67,7 +67,7 @@ func TestHandler(t *testing.T) {
 			name: "success x509 bundle",
 			call: func(server *httptest.Server) (response *http.Response, err error) {
 				source.bundles = map[spiffeid.TrustDomain]*spiffebundle.Bundle{
-					trustDomain: &spiffebundle.Bundle{MarshalResponse: jwksByte},
+					trustDomain: bundle,
 				}
 				return http.Get(server.URL)
 			},
@@ -78,7 +78,7 @@ func TestHandler(t *testing.T) {
 			name: "invalid method",
 			call: func(server *httptest.Server) (response *http.Response, err error) {
 				source.bundles = map[spiffeid.TrustDomain]*spiffebundle.Bundle{
-					trustDomain: &spiffebundle.Bundle{},
+					trustDomain: {},
 				}
 				return http.Post(server.URL, "application/json", strings.NewReader("test"))
 			},
@@ -89,27 +89,29 @@ func TestHandler(t *testing.T) {
 			name: "bundle not found",
 			call: func(server *httptest.Server) (response *http.Response, err error) {
 				source.bundles = map[spiffeid.TrustDomain]*spiffebundle.Bundle{
-					spiffeid.TrustDomain{Id: "spiffe://test.domain2"}: &spiffebundle.Bundle{},
+					spiffeid.RequireTrustDomainFromString("test.domain2"): {},
 				}
 
 				return http.Get(server.URL)
 			},
 			statusCode: http.StatusInternalServerError,
-			response:   "unable to get bundle for provided trust domain \"spiffe://test.domain\"\n",
-			log:        "unable to get bundle for provided trust domain \"spiffe://test.domain\": some error",
+			response:   "unable to get bundle for provided trust domain \"test.domain\"\n",
+			log:        "unable to get bundle for provided trust domain \"test.domain\": bundle not found",
 		},
-		{
-			name: "marshaling error",
-			call: func(server *httptest.Server) (response *http.Response, err error) {
-				source.bundles = map[spiffeid.TrustDomain]*spiffebundle.Bundle{
-					trustDomain: &spiffebundle.Bundle{},
-				}
-				return http.Get(server.URL)
-			},
-			statusCode: http.StatusInternalServerError,
-			response:   "unable to marshal bundle for trust domain \"spiffe://test.domain\"",
-			log:        "unable to marshal bundle for trust domain \"spiffe://test.domain\": some error",
-		},
+		//{
+		//	name: "marshaling error",
+		//	call: func(server *httptest.Server) (response *http.Response, err error) {
+		//		b :=spiffebundle.New(trustDomain)
+		//		b.SetRefreshHint(-1)
+		//		source.bundles = map[spiffeid.TrustDomain]*spiffebundle.Bundle{
+		//			trustDomain: b,
+		//		}
+		//		return http.Get(server.URL)
+		//	},
+		//	statusCode: http.StatusInternalServerError,
+		//	response:   "unable to marshal bundle for trust domain \"test.domain\"",
+		//	log:        "unable to marshal bundle for trust domain \"test.domain\": some error",
+		//},
 	}
 
 	for _, testCase := range testCases {
