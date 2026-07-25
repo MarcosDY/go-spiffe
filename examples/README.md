@@ -15,3 +15,5 @@ This section contains a set of standalone examples that demonstrate different us
 - [HTTP over TLS with JWT and X.509 SVIDs](spiffe-jwt/README.md): _Send HTTP requests between workload over a TLS + JWT authentication using automatically rotated X.509 SVIDs and JWT SVIDs from the SPIFFE Workload API._
 
 - [HTTP over TLS with JWT SVIDs only](spiffe-jwt-using-proxy/README.md): _Authenticate client workloads to the server using JWT-SVIDs sent over TLS-encrypted HTTP connections to handle environments in which a proxy or load balancer would prevent the transmission of X.509-SVIDs over mTLS._
+
+- [HTTP over TLS with WIT-SVIDs](spiffe-wit-http/README.md): _Authenticate client workloads to the server with WIT-SVIDs and proof of possession, so the credential cannot be replayed by whoever receives it. Experimental, and cannot be run end to end until a Workload API implementation serves WIT-SVIDs._
