@@ -243,6 +243,97 @@ func TestMiddlewarePlacesTheCredentialInContext(t *testing.T) {
 	assert.Contains(t, gotSVID.Claims, "cnf")
 }
 
+func TestMiddlewareRequiresExactlyOneOfEachToken(t *testing.T) {
+	// wpt-01 §2 step 1 requires exactly one proof. Reading only the first field
+	// line would diverge from an intermediary that comma-joins repeated values,
+	// which is the classic shape of a header-smuggling bug.
+	f := newFixture(t)
+	valid := makeWPT(t, f.cnfKey, f.validProofClaims())
+
+	tests := []struct {
+		name   string
+		wits   []string
+		proofs []string
+		stage  witwpt.Stage
+	}{
+		{
+			name:   "two proofs, the first valid",
+			wits:   []string{f.svid.Marshal()},
+			proofs: []string{valid, "second-value"},
+			stage:  witwpt.StageProof,
+		},
+		{
+			name:   "two credentials, the first valid",
+			wits:   []string{f.svid.Marshal(), "second-value"},
+			proofs: []string{valid},
+			stage:  witwpt.StageWIT,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var handled error
+			handler := withttp.Middleware(
+				witwpt.NewVerifier(f.bundle),
+				withttp.ExpectedAudience(serverAudience),
+				witwpt.AuthorizeAny(),
+				withttp.WithErrorHandler(func(_ *http.Request, err error) { handled = err }),
+			)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Error("the handler must not run")
+			}))
+
+			request := httptest.NewRequest("GET", serverAudience+"/v2/orders", nil)
+			for _, v := range tt.wits {
+				request.Header.Add(withttp.HeaderWIT, v)
+			}
+			for _, v := range tt.proofs {
+				request.Header.Add(withttp.HeaderProof, v)
+			}
+
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+
+			assert.Equal(t, http.StatusForbidden, recorder.Code)
+			require.Error(t, handled)
+			var verr *witwpt.Error
+			require.ErrorAs(t, handled, &verr)
+			assert.Equal(t, tt.stage, verr.Stage)
+		})
+	}
+}
+
+func TestMiddlewareStripsTheTokensBeforeTheHandler(t *testing.T) {
+	// A handler that proxies onward -- httputil.ReverseProxy, or any client that
+	// copies inbound headers -- would otherwise forward the credential and a
+	// still-valid proof verbatim, performing an onward replay by accident. The
+	// verified credential is already in the context, so the raw tokens have no
+	// remaining use.
+	f := newFixture(t)
+	proof := makeWPT(t, f.cnfKey, f.validProofClaims())
+
+	var gotWIT, gotProof string
+	var svidReachedHandler bool
+	handler := withttp.Middleware(
+		witwpt.NewVerifier(f.bundle),
+		withttp.ExpectedAudience(serverAudience),
+		witwpt.AuthorizeAny(),
+	)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		gotWIT = r.Header.Get(withttp.HeaderWIT)
+		gotProof = r.Header.Get(withttp.HeaderProof)
+		_, err := withttp.PeerSVIDFromContext(r.Context())
+		svidReachedHandler = err == nil
+	}))
+
+	request := httptest.NewRequest("GET", serverAudience+"/v2/orders", nil)
+	request.Header.Set(withttp.HeaderWIT, f.svid.Marshal())
+	request.Header.Set(withttp.HeaderProof, proof)
+	handler.ServeHTTP(httptest.NewRecorder(), request)
+
+	assert.Empty(t, gotWIT, "the credential must not reach the handler as a header")
+	assert.Empty(t, gotProof, "the proof must not reach the handler as a header")
+	assert.True(t, svidReachedHandler, "but the verified credential must still be available")
+}
+
 func TestPeerFromContextWithoutMiddleware(t *testing.T) {
 	// A handler that was not wrapped must get an error, never a zero-value ID
 	// that would read as an authenticated peer.
@@ -299,7 +390,7 @@ func TestEndToEnd(t *testing.T) {
 	var peerID spiffeid.ID
 	handler := withttp.Middleware(
 		witwpt.NewVerifier(f.bundle, witwpt.WithReplayCache(witwpt.NewMemoryReplayCache())),
-		withttp.AudienceFromRequest(),
+		withttp.UnsafeAudienceFromRequest(),
 		witwpt.AuthorizeMemberOf(f.id.TrustDomain()),
 	)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id, err := withttp.PeerIDFromContext(r.Context())

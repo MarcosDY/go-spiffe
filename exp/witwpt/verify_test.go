@@ -151,6 +151,43 @@ func TestVerifyRejections(t *testing.T) {
 			errPart: "no WIT authority",
 		},
 		{
+			name:  "proof binds an OAuth access token via ath",
+			stage: witwpt.StageProof,
+			proof: func(t *testing.T, f *verifyFixture) string {
+				// wpt-01 §2 makes ath mandatory when an access token is present.
+				// This package does not consume it, so accepting the proof would
+				// silently discard a binding the client believes is enforced --
+				// a stolen bearer token would travel with a valid pair and look
+				// bound. Fail closed instead.
+				claims := f.validProofClaims()
+				claims["ath"] = "Zm9vYmFy"
+				return makeWPT(t, f.cnfKey, jose.ES256, "wpt+jwt", claims)
+			},
+			errPart: "token binding",
+		},
+		{
+			name:  "proof binds a Txn-Token via tth",
+			stage: witwpt.StageProof,
+			proof: func(t *testing.T, f *verifyFixture) string {
+				claims := f.validProofClaims()
+				claims["tth"] = "Zm9vYmFy"
+				return makeWPT(t, f.cnfKey, jose.ES256, "wpt+jwt", claims)
+			},
+			errPart: "token binding",
+		},
+		{
+			name:  "proof carries oth entries this verifier does not understand",
+			stage: witwpt.StageProof,
+			proof: func(t *testing.T, f *verifyFixture) string {
+				// wpt-01 §2: "If the oth claim contains entries that are not
+				// understood by the recipient, the WPT MUST be rejected."
+				claims := f.validProofClaims()
+				claims["oth"] = map[string]any{"x-vendor-assertion": "Zm9vYmFy"}
+				return makeWPT(t, f.cnfKey, jose.ES256, "wpt+jwt", claims)
+			},
+			errPart: "token binding",
+		},
+		{
 			name:  "proof typ is not wpt+jwt",
 			stage: witwpt.StageProof,
 			proof: func(t *testing.T, f *verifyFixture) string {
@@ -349,6 +386,30 @@ func TestVerifyReplayCache(t *testing.T) {
 
 		_, err = verifier.Verify(t.Context(), f.witToken, proof, audience)
 		require.Error(t, err)
+
+		var verr *witwpt.Error
+		require.ErrorAs(t, err, &verr)
+		assert.Equal(t, witwpt.StageReplay, verr.Stage)
+	})
+
+	t.Run("a proof still inside the leeway window cannot be replayed", func(t *testing.T) {
+		// The record must outlive the proof's *acceptability*, not its exp. A
+		// proof whose exp has just passed is still accepted thanks to leeway, so
+		// recording it only until exp would leave replay unprotected for the
+		// whole leeway window -- the one window where a captured proof is most
+		// likely to be reused.
+		verifier := witwpt.NewVerifier(f.bundle,
+			witwpt.WithReplayCache(witwpt.NewMemoryReplayCache()))
+
+		claims := f.validProofClaims()
+		claims["exp"] = jwt.NewNumericDate(time.Now().Add(-witwpt.DefaultLeeway / 2))
+		expiring := makeWPT(t, f.cnfKey, jose.ES256, "wpt+jwt", claims)
+
+		_, err := verifier.Verify(t.Context(), f.witToken, expiring, audience)
+		require.NoError(t, err, "precondition: leeway still accepts this proof")
+
+		_, err = verifier.Verify(t.Context(), f.witToken, expiring, audience)
+		require.Error(t, err, "the replay must be rejected")
 
 		var verr *witwpt.Error
 		require.ErrorAs(t, err, &verr)

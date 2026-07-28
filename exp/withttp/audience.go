@@ -28,21 +28,27 @@ func ExpectedAudience(values ...string) Audience {
 	}
 }
 
-// AudienceFromRequest matches a proof against the target URI reconstructed from
-// the incoming request, which needs no configuration.
+// UnsafeAudienceFromRequest matches a proof against the target URI reconstructed
+// from the incoming request, which needs no configuration.
 //
-// It does NOT protect against onward replay. The reconstruction reads r.Host,
-// which any client sets freely, so a service that verifies your proof can turn
-// around and present the same pair to a third party while setting Host to its
-// own name, and that third party will accept it. draft-ietf-wimse-wpt-01 §3.1
-// is explicit that a validator "MUST NOT use untrusted information obtained from
-// the request to determine if the hostname belongs to an authorized authority".
+// # Do not use this unless you have read what it gives up
 //
-// Prefer ExpectedAudience. This mode exists for deployments where the set of
-// names a service answers to is not known at configuration time, and it is
-// named for the precondition it asks you to accept rather than for the check it
-// skips.
-func AudienceFromRequest() Audience {
+// draft-ietf-wimse-wpt-01 §3.1 says a validator "MUST NOT use untrusted
+// information obtained from the request to determine if the hostname belongs to
+// an authorized authority", and continues: "The validator MUST get the
+// information about allowed URL authorities from a trusted source such as
+// out-of-band configuration. The Host of the request or an 'X-Forwarded-Host'
+// header is an example of untrusted data and cannot be trusted and MUST NOT be
+// used."
+//
+// This function reads r.Host. It therefore violates that requirement, and is
+// named Unsafe for exactly that reason. The practical consequence is that a
+// service which legitimately receives your credential and proof can present the
+// same pair onward to a third party while claiming your authority, and that third
+// party will accept it -- the proof is genuine, it simply was not meant for them.
+//
+// Use ExpectedAudience. It is one string of configuration and it closes this.
+func UnsafeAudienceFromRequest() Audience {
 	return func(r *http.Request, aud string) error {
 		return witwpt.AcceptAudience(serverTargetURI(r))(aud)
 	}
@@ -58,8 +64,7 @@ func AudienceFromRequest() Audience {
 // connection was TLS.
 //
 // It is unexported deliberately. Both inputs are attacker-supplied or
-// channel-derived rather than verified, so it must stay reachable only through
-// AudienceFromRequest, whose documentation states that tradeoff. Forwarding
+// channel-derived rather than verified, so it must stay reachable only through// UnsafeAudienceFromRequest, whose documentation states that tradeoff. Forwarding
 // headers are never consulted.
 func serverTargetURI(r *http.Request) string {
 	scheme := "http"

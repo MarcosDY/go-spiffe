@@ -130,8 +130,14 @@ func (v *Verifier) Verify(ctx context.Context, witToken, wptToken string,
 
 	// Step 3: replay, once the identity is known so a jti cannot be claimed
 	// across workloads.
+	//
+	// The record must last as long as the proof remains *acceptable*, which is
+	// leeway past its exp -- not until exp itself. Recording only until exp would
+	// leave the whole leeway window unprotected, which is precisely the window in
+	// which a captured proof is most likely to be reused.
 	if v.config.replayCache != nil {
-		if err := v.config.replayCache.CheckAndRecord(ctx, svid.ID, claims.id, claims.expiry); err != nil {
+		dropAfter := claims.expiry.Add(v.config.leeway)
+		if err := v.config.replayCache.CheckAndRecord(ctx, svid.ID, claims.id, dropAfter); err != nil {
 			return nil, newError(StageReplay, err)
 		}
 	}
@@ -200,6 +206,10 @@ func (v *Verifier) verifyProof(witToken, wptToken string, svid *witsvid.SVID) (p
 		return out, errors.New("proof is missing the jti claim")
 	}
 
+	if err := rejectTokenBindings(raw); err != nil {
+		return out, err
+	}
+
 	var std jwt.Claims
 	if err := tok.UnsafeClaimsWithoutVerification(&std); err != nil {
 		return out, fmt.Errorf("unable to read proof claims: %w", err)
@@ -235,6 +245,33 @@ func (v *Verifier) verifyProof(witToken, wptToken string, svid *witsvid.SVID) (p
 	audience, _ := raw["aud"].(string)
 	out = proofClaims{audience: audience, id: jti, expiry: expiry}
 	return out, nil
+}
+
+// bindingClaims are the WPT claims that bind a proof to some *other* credential
+// travelling with the request (wpt-01 §2): an OAuth access token, a Txn-Token, or
+// another end-user-context token.
+var bindingClaims = []string{"ath", "tth", "oth"}
+
+// rejectTokenBindings refuses a proof that binds a credential this package does
+// not model, rather than ignoring the binding.
+//
+// Failing closed is the important part. A conformant client that sets ath
+// believes its access token is cryptographically bound to this WIT-SVID; if the
+// verifier quietly discards that, a stolen bearer token presented alongside an
+// attacker's own valid WIT and proof looks bound and is not. wpt-01 §2 is also
+// explicit for oth: "If the oth claim contains entries that are not understood
+// by the recipient, the WPT MUST be rejected."
+//
+// Supporting these claims means consuming the bound credential too, which is out
+// of scope here. Until then a loud rejection beats an invisible hole.
+func rejectTokenBindings(raw map[string]any) error {
+	for _, claim := range bindingClaims {
+		if _, ok := raw[claim]; ok {
+			return fmt.Errorf("proof carries the %q claim, and token binding is not "+
+				"supported by this verifier", claim)
+		}
+	}
+	return nil
 }
 
 // Verify authenticates a peer using a verifier with default settings. Use

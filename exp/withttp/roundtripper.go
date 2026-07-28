@@ -133,6 +133,10 @@ func (rt *roundTripper) transport() http.RoundTripper {
 // req.URL is already absolute on an outbound request.
 func clientTargetURI(req *http.Request) string {
 	target := *req.URL
+	// net/http retains URL.User for the Authorization header, so it has to be
+	// cleared explicitly: otherwise a password ends up inside a signed token on
+	// the wire, and in any log line reporting an audience mismatch.
+	target.User = nil
 	target.RawQuery = ""
 	target.Fragment = ""
 	target.RawFragment = ""

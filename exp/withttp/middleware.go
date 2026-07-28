@@ -3,6 +3,7 @@ package withttp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/spiffe/go-spiffe/v2/exp/svid/witsvid"
@@ -80,9 +81,41 @@ func Middleware(verifier *witwpt.Verifier, audience Audience, authorizer witwpt.
 				w.WriteHeader(http.StatusForbidden)
 				return
 			}
-			next.ServeHTTP(w, r.WithContext(withPeerSVID(r.Context(), svid)))
+			next.ServeHTTP(w, forHandler(r, svid))
 		})
 	}
+}
+
+// exactlyOne returns the single value of a header, rejecting both absence and
+// duplication. An empty string is returned with no error when the header is
+// absent, so the core reports the missing token with its own message.
+func exactlyOne(r *http.Request, name string) (string, error) {
+	values := r.Header.Values(name)
+	switch len(values) {
+	case 0:
+		return "", nil
+	case 1:
+		return values[0], nil
+	default:
+		return "", fmt.Errorf("expected exactly one %s header, got %d", name, len(values))
+	}
+}
+
+// forHandler returns the request to pass on: the verified credential in the
+// context, and the raw tokens removed.
+//
+// Stripping them matters because a handler that proxies onward -- httputil.
+// ReverseProxy, or any client copying inbound headers -- would otherwise forward
+// the credential and a still-valid proof verbatim, performing an onward replay by
+// accident. Since a proof's audience is authority-scoped, a third party sharing
+// the authority would accept it. Nothing needs the raw tokens once verification
+// has produced the SVID.
+func forHandler(r *http.Request, svid *witsvid.SVID) *http.Request {
+	// Clone so the caller's request is left as it was.
+	out := r.Clone(withPeerSVID(r.Context(), svid))
+	out.Header.Del(HeaderWIT)
+	out.Header.Del(HeaderProof)
+	return out
 }
 
 func authenticate(r *http.Request, verifier *witwpt.Verifier, audience Audience,
@@ -97,13 +130,24 @@ func authenticate(r *http.Request, verifier *witwpt.Verifier, audience Audience,
 				"if a secure channel is provided by other means"))
 	}
 
+	// wpt-01 §2 step 1: exactly one of each. Taking only the first field line
+	// would let a request that an intermediary reads as a comma-joined list be
+	// parsed differently here, which is how header smuggling gets in.
+	witToken, err := exactlyOne(r, HeaderWIT)
+	if err != nil {
+		return nil, &witwpt.Error{Stage: witwpt.StageWIT, Err: err}
+	}
+	proofToken, err := exactlyOne(r, HeaderProof)
+	if err != nil {
+		return nil, &witwpt.Error{Stage: witwpt.StageProof, Err: err}
+	}
+
 	// Bind this request into the core's transport-neutral matcher.
 	matcher := witwpt.AudienceMatcher(func(aud string) error {
 		return audience(r, aud)
 	})
 
-	svid, err := verifier.Verify(r.Context(),
-		r.Header.Get(HeaderWIT), r.Header.Get(HeaderProof), matcher)
+	svid, err := verifier.Verify(r.Context(), witToken, proofToken, matcher)
 	if err != nil {
 		return nil, err
 	}

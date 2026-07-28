@@ -51,6 +51,31 @@ func TestRoundTripperAttachesBothTokens(t *testing.T) {
 	})
 }
 
+func TestRoundTripperKeepsCredentialsOutOfTheAudience(t *testing.T) {
+	// net/http keeps URL.User for the Authorization header, so a URL carrying
+	// userinfo would otherwise put a password inside a signed token on the wire --
+	// and into any log line that reports an audience mismatch.
+	f := newFixture(t)
+	base := &capturingTransport{}
+	rt := withttp.NewRoundTripper(staticSource{svid: f.svid}, base)
+
+	request := httptest.NewRequest("GET",
+		"https://alice:s3cr3t@server.example.org/v2/orders?page=2#top", nil)
+	resp, err := rt.RoundTrip(request)
+	require.NoError(t, err)
+	require.NoError(t, resp.Body.Close())
+
+	tok, err := jwt.ParseSigned(base.got.Header.Get(withttp.HeaderProof),
+		[]jose.SignatureAlgorithm{jose.ES256})
+	require.NoError(t, err)
+	var claims map[string]any
+	require.NoError(t, tok.Claims(f.cnfKey.Public(), &claims))
+
+	assert.Equal(t, "https://server.example.org/v2/orders", claims["aud"])
+	assert.NotContains(t, claims["aud"], "s3cr3t")
+	assert.NotContains(t, claims["aud"], "alice")
+}
+
 func TestRoundTripperDoesNotMutateTheCallersRequest(t *testing.T) {
 	// http.RoundTripper's contract forbids modifying the request it is given.
 	f := newFixture(t)

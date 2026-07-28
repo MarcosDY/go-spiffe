@@ -25,7 +25,7 @@ func TestExpectedAudience(t *testing.T) {
 
 	t.Run("ignores the request entirely", func(t *testing.T) {
 		// Strict mode must not consult the request, or it would inherit the
-		// Host-spoofing weakness that AudienceFromRequest documents.
+		// Host-spoofing weakness that UnsafeAudienceFromRequest documents.
 		spoofed := httptest.NewRequest("GET", "https://elsewhere.example.org/v2/orders", nil)
 		require.ErrorContains(t,
 			audience(spoofed, "https://elsewhere.example.org/v2/orders"), "not accepted here")
@@ -37,8 +37,8 @@ func TestExpectedAudience(t *testing.T) {
 	})
 }
 
-func TestAudienceFromRequest(t *testing.T) {
-	audience := withttp.AudienceFromRequest()
+func TestUnsafeAudienceFromRequest(t *testing.T) {
+	audience := withttp.UnsafeAudienceFromRequest()
 
 	tests := []struct {
 		name     string
@@ -113,12 +113,12 @@ func TestAudienceFromRequest(t *testing.T) {
 	}
 }
 
-func TestAudienceFromRequestDerivesHTTPWithoutTLS(t *testing.T) {
+func TestUnsafeAudienceFromRequestDerivesHTTPWithoutTLS(t *testing.T) {
 	// Behind a TLS-terminating sidecar r.TLS is nil, so the derived scheme is
 	// http while the client, which required https before attaching tokens,
 	// minted an https audience. The combination therefore cannot match, which is
 	// why that topology wants ExpectedAudience instead.
-	audience := withttp.AudienceFromRequest()
+	audience := withttp.UnsafeAudienceFromRequest()
 	request := httptest.NewRequest("GET", "http://server.example.org/v2/orders", nil)
 	require.Nil(t, request.TLS, "precondition: plaintext request")
 
