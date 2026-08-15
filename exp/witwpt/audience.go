@@ -12,31 +12,16 @@ import (
 type AudienceMatcher func(aud string) error
 
 // AcceptAudience returns an AudienceMatcher that matches aud against values,
-// normalizing both sides to scheme and authority.
+// normalizing both sides to scheme and authority as wpt-01 §2's "acceptable
+// alias or normalization" allows: the scheme and host are lowercased, and a
+// default port, path, query, and fragment are dropped.
 //
-// draft-ietf-wimse-wpt-01 §2 requires that aud "matches the target URI, or an
-// acceptable alias or normalization thereof, of the HTTP request in which the WPT
-// was received, ignoring any query and fragment parts". Normalization here
-// lowercases the scheme and host, drops a port that is the default for the
-// scheme, and discards the query and fragment.
+// Dropping the path means a proof is bound to an authority, not to a route, so
+// any endpoint on that hostname accepts a captured pair for the proof's
+// lifetime; WithReplayCache narrows that, a path in a configured value does not.
 //
-// # Proofs are scoped to an authority, not to a resource
-//
-// This also discards the PATH, on both sides. The draft names query and fragment
-// explicitly and leaves path handling to what counts as an "acceptable alias or
-// normalization", so this is a deliberate reading rather than something the draft
-// spells out. gRPC forces it in any case, since grpc-go's client-side audience is
-// per-service.
-//
-// The consequence is a security tradeoff worth stating plainly: a proof is bound
-// to an authority, not to a route or a method. Any endpoint sharing a hostname
-// can present a captured pair to any other endpoint on that hostname for the
-// proof's lifetime. WithReplayCache narrows that; a path in a configured value
-// does NOT, because it is ignored -- ExpectedAudience("https://api.example.org/a")
-// also accepts a proof minted for /b.
-//
-// A value that cannot be normalized is retained verbatim, so it never matches a
-// normalized audience and appears in the mismatch error for diagnosis.
+// A value that cannot be normalized is kept verbatim, so it never matches and
+// still appears in the mismatch error.
 func AcceptAudience(values ...string) AudienceMatcher {
 	accepted := make([]string, 0, len(values))
 	for _, value := range values {
@@ -63,8 +48,8 @@ func AcceptAudience(values ...string) AudienceMatcher {
 			}
 		}
 
-		// Both values are named so a proxy or port misconfiguration is
-		// diagnosable from a single log line.
+		// Both sides are named so a proxy or port misconfiguration is diagnosable
+		// from one log line.
 		return wrapErr(fmt.Errorf("proof audience %q is not accepted here (expected one of %q)",
 			aud, accepted))
 	}

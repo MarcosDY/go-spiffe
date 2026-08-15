@@ -6,19 +6,16 @@ import (
 )
 
 // errReplayed is the cause reported when a proof's jti has already been
-// recorded. It is unexported deliberately: callers distinguish failures by
-// Stage, which is stable, rather than by matching sentinel values.
+// recorded. It is unexported because callers distinguish failures by Stage.
 var errReplayed = errors.New("proof token has already been used")
 
-// Stage identifies which step of verification rejected a request. It is
-// machine-readable so a rejection can be counted, not only logged.
+// Stage identifies which step of verification rejected a request, so a
+// rejection can be counted and not only logged.
 type Stage int
 
 const (
-	// StageWIT covers validating the WIT-SVID against the trust bundle: its
-	// typ, kid, signature, expiry, subject, and confirmation key. An unfederated
-	// trust domain and an unknown key ID both land here, because witsvid
-	// reports them through one call whose wrapped error carries the detail.
+	// StageWIT covers validating the WIT-SVID against the trust bundle: its typ,
+	// kid, signature, expiry, subject, and confirmation key.
 	StageWIT Stage = iota + 1
 
 	// StageProof covers verifying the WPT against the confirmation key the
@@ -44,12 +41,8 @@ func (s Stage) String() string {
 }
 
 // Error is a verification failure together with the stage that produced it.
-//
-// Verify returns errors of this type so an operator's error handler can count
-// rejections by stage while the caller is told only that it was refused. This is
-// a deliberate exception to the surrounding convention of opaque wrapped errors:
-// Verify is the one place where the caller-facing message is intentionally
-// uninformative, so it is the one place a typed error earns its keep.
+// Verify returns errors of this type so an error handler can count rejections
+// by stage while the remote caller is told only that it was refused.
 type Error struct {
 	// Stage is the step that rejected the request.
 	Stage Stage

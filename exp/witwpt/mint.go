@@ -1,15 +1,11 @@
 // Package witwpt implements the Workload Proof Token (WPT) proof-of-possession
-// protocol for WIT-SVIDs, as specified by draft-ietf-wimse-wpt-01.
-//
-// A WIT-SVID carries an identity and names a confirmation key in its cnf.jwk
-// claim; it is never a bearer token. To present one, a workload mints a short
-// lived WPT signed with the matching private key, binding the proof to both the
-// credential (via wth) and the request target (via aud). A verifier validates
-// the WIT-SVID against its trust bundle first, and only then checks the proof
-// against the confirmation key the credential named.
+// protocol for WIT-SVIDs, as specified by draft-ietf-wimse-wpt-01. A workload
+// mints a short-lived WPT signed with the private key matching the WIT-SVID's
+// cnf.jwk claim, binding the proof to the credential (wth) and to the request
+// target (aud).
 //
 // This package is transport neutral. See exp/withttp for the net/http
-// integration, which is what most callers should use.
+// integration.
 package witwpt
 
 import (
@@ -27,28 +23,24 @@ import (
 
 const (
 	// DefaultProofLifetime is how far ahead a minted proof's exp is set. The
-	// draft calls for "minutes or seconds"; a fresh proof is minted per request,
-	// so this is a ceiling on replay, not a cache duration.
+	// draft calls for a lifetime of "minutes or seconds".
 	DefaultProofLifetime = 60 * time.Second
 
 	// DefaultLeeway is the clock-skew tolerance a verifier applies to a proof's
-	// exp and nbf. It is deliberately far tighter than the one-minute
-	// jwt.DefaultLeeway that witsvid applies to the WIT: reusing that here would
-	// roughly double a 60-second proof's effective validity.
+	// exp and nbf. It is tighter than the one-minute jwt.DefaultLeeway witsvid
+	// applies to the WIT, which would nearly double a proof's validity.
 	DefaultLeeway = 10 * time.Second
 
-	// DefaultMaxLifetime is the furthest-future exp a verifier will accept. It
-	// gives teeth to wpt-01 §2's requirement that "unreasonably far future"
-	// values SHOULD be rejected; without it a client could mint a proof valid
-	// for a week and nothing would object.
+	// DefaultMaxLifetime is the furthest-future exp a verifier accepts,
+	// enforcing wpt-01 §2's rejection of "unreasonably far future" values.
 	DefaultMaxLifetime = 5 * time.Minute
 )
 
 // proofType is the required typ header of a WPT (wpt-01 §2).
 const proofType = "wpt+jwt"
 
-// jtiBytes is the entropy behind each proof's jti. wpt-01 §2 asks for a
-// collision probability that is "negligible", suggesting 128 random bits.
+// jtiBytes is the entropy behind each proof's jti, per wpt-01 §2's suggested
+// 128 random bits.
 const jtiBytes = 16
 
 // MintOption configures Mint.
@@ -65,22 +57,19 @@ type mintOption func(*mintConfig)
 func (fn mintOption) configureMint(c *mintConfig) { fn(c) }
 
 // WithProofLifetime sets how far ahead the minted proof's exp is placed,
-// overriding DefaultProofLifetime. A verifier rejects a lifetime beyond its own
-// maximum, so raising this past DefaultMaxLifetime will cause rejections.
+// overriding DefaultProofLifetime. Raising it past the verifier's maximum
+// lifetime causes the proof to be rejected.
 func WithProofLifetime(lifetime time.Duration) MintOption {
 	return mintOption(func(c *mintConfig) {
 		c.lifetime = lifetime
 	})
 }
 
-// Mint returns a Workload Proof Token proving possession of svid's confirmation
-// key, bound to svid and scoped to audience.
+// Mint returns a Workload Proof Token, in JWS compact serialization, proving
+// possession of svid's confirmation key, bound to svid and scoped to audience.
 //
 // audience should be the request target URI without query or fragment
-// (wpt-01 §2); a verifier compares it under normalization, so a full target URI
-// is both correct and portable. A fresh proof should be minted per request.
-//
-// The returned token is a compact JWS and is safe to place in an ASCII header.
+// (wpt-01 §2). A fresh proof should be minted per request.
 func Mint(svid *witsvid.SVID, audience string, opts ...MintOption) (string, error) {
 	if svid == nil {
 		return "", wrapErr(errors.New("no WIT-SVID provided"))
@@ -97,8 +86,7 @@ func Mint(svid *witsvid.SVID, audience string, opts ...MintOption) (string, erro
 		return "", wrapErr(errors.New("WIT-SVID has no token to bind the proof to"))
 	}
 
-	// wpt-01 §2 requires the proof's alg to string-equal the WIT's cnf.jwk.alg,
-	// so it is read from the credential rather than chosen here.
+	// wpt-01 §2 requires the proof's alg to string-equal the WIT's cnf.jwk.alg.
 	alg, err := confirmationAlgorithm(svid)
 	if err != nil {
 		return "", err
@@ -138,19 +126,15 @@ func Mint(svid *witsvid.SVID, audience string, opts ...MintOption) (string, erro
 
 // WITThumbprint returns the wth claim value binding a proof to a WIT-SVID:
 // base64url(SHA-256(ASCII(token))) over the compact serialization, per
-// wpt-01 §2.
-//
-// Note this hashes the token string itself. It is NOT an RFC 7638 JWK
-// thumbprint of the confirmation key, which is a distinct and incompatible
-// construction that would nonetheless interoperate with itself.
+// wpt-01 §2. This hashes the token itself, not an RFC 7638 JWK thumbprint of
+// the confirmation key.
 func WITThumbprint(witToken string) string {
 	sum := sha256.Sum256([]byte(witToken))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 // confirmationAlgorithm reads cnf.jwk.alg from the credential's claims. witsvid
-// already validated that the value is present, a string, and a supported
-// asymmetric algorithm.
+// already validated it is present and a supported asymmetric algorithm.
 func confirmationAlgorithm(svid *witsvid.SVID) (jose.SignatureAlgorithm, error) {
 	cnf, ok := svid.Claims["cnf"].(map[string]any)
 	if !ok {

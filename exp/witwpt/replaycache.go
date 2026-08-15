@@ -15,32 +15,23 @@ const minSweepSize = 128
 // ReplayCache remembers which proofs have been seen, so a captured proof cannot
 // be presented twice within its lifetime. wpt-01 §2 RECOMMENDS this check.
 //
-// Note it is the WPT's jti that is recorded. A WIT-SVID's own jti MUST NOT be
-// used for replay protection (SPIFFE WIT-SVID.md §3.3), because the same value
-// may legitimately be issued to two instances on one host.
+// It is the WPT's jti that is recorded; a WIT-SVID's own jti MUST NOT be used
+// for replay protection (SPIFFE WIT-SVID.md §3.3).
 type ReplayCache interface {
 	// CheckAndRecord records the proof identified by id and jti, returning an
 	// error if that pair has already been recorded. exp is when the record may
-	// be dropped.
-	//
-	// Implementations MUST make the check and the record atomic. A two-step
-	// interface would let two verifiers both observe "unseen" and both accept.
+	// be dropped. Implementations MUST make the check and the record atomic.
 	CheckAndRecord(ctx context.Context, id spiffeid.ID, jti string, exp time.Time) error
 }
 
 // NewMemoryReplayCache returns a ReplayCache holding records in memory for the
-// life of the process.
+// life of the process, reclaiming expired records during writes so it owns no
+// goroutine and needs no Close.
 //
-// It protects a single process only. A deployment running several replicas
-// behind a load balancer needs a shared store to reject a proof replayed to a
-// different replica; implement ReplayCache over one (a Redis SET NX EX maps
-// onto CheckAndRecord directly) and pass it to WithReplayCache.
-//
-// The footprint is bounded by the verifier's maximum accepted proof lifetime,
-// since no record is worth keeping past it, and only peers that already cleared
-// WIT validation and proof verification ever reach the cache. Expired records
-// are reclaimed during writes, so the cache owns no goroutine and needs no
-// Close.
+// It covers a single process only. A deployment running several replicas needs a
+// shared store to reject a proof replayed to a different replica; implement
+// ReplayCache over one (a Redis SET NX EX maps onto CheckAndRecord) and pass it
+// to WithReplayCache.
 func NewMemoryReplayCache() ReplayCache {
 	return newMemoryReplayCache()
 }
@@ -78,8 +69,7 @@ func (c *memoryReplayCache) CheckAndRecord(
 
 	key := replayKey{id: id.String(), jti: jti}
 	if previous, ok := c.entries[key]; ok && previous.After(now) {
-		// Returned unprefixed so the caller that surfaces it -- normally Verify,
-		// wrapping it as StageReplay -- supplies the one package prefix.
+		// Unprefixed, since Verify wraps it as StageReplay with the package prefix.
 		return errReplayed
 	}
 
@@ -87,8 +77,7 @@ func (c *memoryReplayCache) CheckAndRecord(
 	return nil
 }
 
-// sweep drops every record whose exp has passed. The one mutex held across
-// check and insert satisfies the interface's atomicity requirement outright.
+// sweep drops every record whose exp has passed. The caller must hold the mutex.
 func (c *memoryReplayCache) sweep(now time.Time) {
 	for key, exp := range c.entries {
 		if !exp.After(now) {
