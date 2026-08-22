@@ -13,12 +13,10 @@ type AudienceMatcher func(aud string) error
 
 // AcceptAudience returns an AudienceMatcher that matches aud against values,
 // normalizing both sides to scheme and authority as wpt-01 §2's "acceptable
-// alias or normalization" allows: the scheme and host are lowercased, and a
-// default port, path, query, and fragment are dropped.
-//
-// Dropping the path means a proof is bound to an authority, not to a route, so
-// any endpoint on that hostname accepts a captured pair for the proof's
-// lifetime; WithReplayCache narrows that, a path in a configured value does not.
+// alias or normalization" allows: scheme and host are lowercased, and a default
+// port, path, query, and fragment are dropped. A proof is therefore bound to an
+// authority, not to a route; use WithReplayCache to narrow that, since a path in
+// a configured value is ignored.
 //
 // A value that cannot be normalized is kept verbatim, so it never matches and
 // still appears in the mismatch error.
