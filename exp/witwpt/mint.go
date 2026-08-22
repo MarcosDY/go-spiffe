@@ -4,7 +4,8 @@
 // cnf.jwk claim, binding the proof to the credential (wth) and to the request
 // target (aud).
 //
-// This package is transport neutral.
+// This package is transport neutral. See exp/withttp for the net/http
+// integration.
 package witwpt
 
 import (
