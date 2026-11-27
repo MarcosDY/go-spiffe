@@ -26,7 +26,7 @@ func (f *fixture) validProofClaims() map[string]any {
 		"aud": serverAudience + "/v2/orders",
 		"exp": jwt.NewNumericDate(time.Now().Add(witwpt.DefaultProofLifetime)),
 		"jti": "jti-middleware-0001",
-		"wth": witwpt.WITThumbprint(f.svid.Marshal()),
+		"wth": witwpt.WITHash(f.svid.Marshal()),
 	}
 }
 
@@ -107,7 +107,7 @@ func TestMiddlewareAnswers403ForEveryFailure(t *testing.T) {
 			stage: witwpt.StageProof,
 			proof: func(t *testing.T, f *fixture) string {
 				claims := f.validProofClaims()
-				claims["wth"] = witwpt.WITThumbprint("some other token")
+				claims["wth"] = witwpt.WITHash("some other token")
 				return makeWPT(t, f.cnfKey, claims)
 			},
 		},
@@ -159,7 +159,7 @@ func TestMiddlewareAnswers403ForEveryFailure(t *testing.T) {
 			// Rebuild the proof against whichever credential is being sent, so
 			// only the property under test is wrong.
 			claims := f.validProofClaims()
-			claims["wth"] = witwpt.WITThumbprint(witToken)
+			claims["wth"] = witwpt.WITHash(witToken)
 			proof := makeWPT(t, f.cnfKey, claims)
 			if tt.proof != nil {
 				proof = tt.proof(t, f)

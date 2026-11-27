@@ -45,7 +45,7 @@ func TestRoundTripperAttachesBothTokens(t *testing.T) {
 		var claims map[string]any
 		require.NoError(t, tok.Claims(f.cnfKey.Public(), &claims))
 
-		assert.Equal(t, witwpt.WITThumbprint(f.svid.Marshal()), claims["wth"])
+		assert.Equal(t, witwpt.WITHash(f.svid.Marshal()), claims["wth"])
 		// aud is the target URI without query or fragment (wpt-01 §2).
 		assert.Equal(t, "https://server.example.org/v2/orders", claims["aud"])
 	})
