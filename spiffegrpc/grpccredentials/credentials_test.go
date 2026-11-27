@@ -177,3 +177,47 @@ func (s greeterServer) SayHello(ctx context.Context, in *helloworld.HelloRequest
 	peerID, _ := grpccredentials.PeerIDFromContext(ctx)
 	return &helloworld.HelloReply{Message: peerID.String()}, nil
 }
+
+func TestAuthInfoWrapperReportsSecurityLevel(t *testing.T) {
+	// authInfoWrapper embeds the credentials.AuthInfo *interface*, so any method
+	// the concrete type has -- including GetCommonAuthInfo, which TLSInfo gets
+	// from its embedded CommonAuthInfo -- is hidden unless forwarded explicitly.
+	//
+	// That matters because credentials.CheckSecurityLevel fails open: it returns
+	// nil when the AuthInfo does not implement GetCommonAuthInfo. Hiding the
+	// method therefore silently satisfies any caller using that helper as a
+	// security control, which exp/witgrpc's channel check does.
+	td := spiffeid.RequireTrustDomainFromString("domain.test")
+	ca := test.NewCA(t, td)
+	serverID := spiffeid.RequireFromPath(td, "/server")
+	serverSVID := ca.CreateX509SVID(serverID)
+
+	serverConn, clientConn := net.Pipe()
+	t.Cleanup(func() { serverConn.Close(); clientConn.Close() })
+
+	type handshake struct {
+		authInfo credentials.AuthInfo
+		err      error
+	}
+	done := make(chan handshake, 1)
+	go func() {
+		_, authInfo, err := grpccredentials.TLSServerCredentials(serverSVID).
+			ServerHandshake(serverConn)
+		done <- handshake{authInfo: authInfo, err: err}
+	}()
+
+	_, _, err := grpccredentials.TLSClientCredentials(ca.Bundle(),
+		tlsconfig.AuthorizeID(serverID)).
+		ClientHandshake(context.Background(), "server", clientConn)
+	require.NoError(t, err)
+
+	result := <-done
+	require.NoError(t, result.err)
+	require.NotNil(t, result.authInfo)
+
+	info, ok := result.authInfo.(interface {
+		GetCommonAuthInfo() credentials.CommonAuthInfo
+	})
+	require.True(t, ok, "the wrapper must not hide GetCommonAuthInfo")
+	require.Equal(t, credentials.PrivacyAndIntegrity, info.GetCommonAuthInfo().SecurityLevel)
+}

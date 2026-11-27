@@ -128,3 +128,19 @@ type authInfoWrapper struct {
 func (w authInfoWrapper) PeerID() (spiffeid.ID, bool) {
 	return w.peerID, !w.peerID.IsZero()
 }
+
+// GetCommonAuthInfo forwards the wrapped AuthInfo's security level.
+//
+// This is not redundant with the embedded field: AuthInfo is an interface, so
+// embedding it promotes only AuthType, hiding GetCommonAuthInfo even though the
+// concrete credentials.TLSInfo has it. Without this method
+// credentials.CheckSecurityLevel silently passes any check against this wrapper,
+// because that helper treats "does not report a level" as acceptable.
+func (w authInfoWrapper) GetCommonAuthInfo() credentials.CommonAuthInfo {
+	if info, ok := w.AuthInfo.(interface {
+		GetCommonAuthInfo() credentials.CommonAuthInfo
+	}); ok {
+		return info.GetCommonAuthInfo()
+	}
+	return credentials.CommonAuthInfo{}
+}
