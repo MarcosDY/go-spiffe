@@ -43,7 +43,7 @@ func TestPerRPCCredentialsCarriesBothTokens(t *testing.T) {
 		var claims map[string]any
 		require.NoError(t, tok.Claims(f.cnfKey.Public(), &claims))
 
-		assert.Equal(t, witwpt.WITThumbprint(f.svid.Marshal()), claims["wth"])
+		assert.Equal(t, witwpt.WITHash(f.svid.Marshal()), claims["wth"])
 		// Minted against uri[0] directly: grpc-go already computed it, so there
 		// is no bespoke target derivation on the client.
 		assert.Equal(t, grpcAudience, claims["aud"])
