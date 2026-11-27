@@ -14,7 +14,7 @@ import (
 )
 
 // allowedProofAlgorithms mirrors the asymmetric algorithms witsvid permits for a
-// confirmation key. wpt-01 §2 requires "none" and symmetric algorithms be
+// confirmation key. wpt-02 §2 requires "none" and symmetric algorithms be
 // rejected.
 var allowedProofAlgorithms = []jose.SignatureAlgorithm{
 	jose.RS256, jose.RS384, jose.RS512,
@@ -28,8 +28,8 @@ const (
 	DefaultLeeway = 10 * time.Second
 
 	// DefaultMaxLifetime is the furthest-future exp a verifier accepts,
-	// enforcing wpt-01 §2's rejection of "unreasonably far future" values.
-	DefaultMaxLifetime = 5 * time.Minute
+	// enforcing wpt-02 §2's rejection of "unreasonably far future" values.
+	DefaultMaxLifetime = MaxProofLifetime
 )
 
 // VerifyOption configures a Verifier.
@@ -174,13 +174,10 @@ func (v *Verifier) verifyProof(witToken, wptToken string, svid *witsvid.SVID) (p
 		return out, fmt.Errorf("proof header type must be %q, got %q", proofType, typ)
 	}
 
-	// alg MUST string-equal the WIT's cnf.jwk.alg (wpt-01 §2), so the presenter
+	// alg MUST string-equal the WIT's cnf.jwk.alg (wpt-02 §2), so the presenter
 	// cannot choose it.
-	expectedAlg, err := confirmationAlgorithm(svid)
-	if err != nil {
-		return out, err
-	}
-	if header.Algorithm != string(expectedAlg) {
+	expectedAlg := svid.ConfirmationAlgorithm()
+	if header.Algorithm != expectedAlg {
 		return out, fmt.Errorf("proof alg %q does not match the WIT-SVID's cnf.jwk alg %q",
 			header.Algorithm, expectedAlg)
 	}
@@ -197,7 +194,7 @@ func (v *Verifier) verifyProof(witToken, wptToken string, svid *witsvid.SVID) (p
 	if wth == "" {
 		return out, errors.New("proof is missing the wth claim")
 	}
-	expectedWTH := WITThumbprint(witToken)
+	expectedWTH := WITHash(witToken)
 	if subtle.ConstantTimeCompare([]byte(wth), []byte(expectedWTH)) != 1 {
 		return out, errors.New("proof wth claim is not bound to the presented WIT-SVID")
 	}
@@ -229,7 +226,7 @@ func (v *Verifier) verifyProof(witToken, wptToken string, svid *witsvid.SVID) (p
 	now := time.Now()
 	expiry := std.Expiry.Time()
 
-	// wpt-01 §2: unreasonably far future exp values SHOULD be rejected.
+	// wpt-02 §2: unreasonably far future exp values SHOULD be rejected.
 	if expiry.After(now.Add(v.config.maxLifetime + v.config.leeway)) {
 		return out, fmt.Errorf("proof exp is too far in the future (max lifetime %s)",
 			v.config.maxLifetime)
@@ -255,8 +252,8 @@ func (v *Verifier) verifyProof(witToken, wptToken string, svid *witsvid.SVID) (p
 }
 
 // bindingClaims are the WPT claims that bind a proof to some other credential
-// travelling with the request (wpt-01 §2): an OAuth access token, a Txn-Token, or
-// another end-user-context token.
+// travelling with the request: a Txn-Token or another token (wpt-02 §2), and an
+// OAuth access token (ath, defined only in wpt-02).
 var bindingClaims = []string{"ath", "tth", "oth"}
 
 // rejectTokenBindings fails closed on bindings this package does not enforce,

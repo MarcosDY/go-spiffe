@@ -68,7 +68,7 @@ func (f *verifyFixture) validProofClaims() map[string]any {
 		"aud": verifyAudience,
 		"exp": jwt.NewNumericDate(time.Now().Add(witwpt.DefaultProofLifetime)),
 		"jti": "jti-fixture-0001",
-		"wth": witwpt.WITThumbprint(f.witToken),
+		"wth": witwpt.WITHash(f.witToken),
 	}
 }
 
@@ -176,7 +176,7 @@ func TestVerifyRejections(t *testing.T) {
 			name:  "proof carries oth entries this verifier does not understand",
 			stage: witwpt.StageProof,
 			proof: func(t *testing.T, f *verifyFixture) string {
-				// wpt-01 §2: "If the oth claim contains entries that are not
+				// wpt-02 §2: "If the oth claim contains entries that are not
 				// understood by the recipient, the WPT MUST be rejected."
 				claims := f.validProofClaims()
 				claims["oth"] = map[string]any{"x-vendor-assertion": "Zm9vYmFy"}
@@ -199,7 +199,7 @@ func TestVerifyRejections(t *testing.T) {
 				other := makeWIT(t, f.authority, "authority-1", f.id, f.cnfKey.Public(),
 					jose.ES256, time.Now().Add(2*time.Hour))
 				claims := f.validProofClaims()
-				claims["wth"] = witwpt.WITThumbprint(other)
+				claims["wth"] = witwpt.WITHash(other)
 				return makeWPT(t, f.cnfKey, jose.ES256, "wpt+jwt", claims)
 			},
 			errPart: "wth",
@@ -377,7 +377,7 @@ func TestVerifyRejections(t *testing.T) {
 				"aud": verifyAudience,
 				"exp": jwt.NewNumericDate(time.Now().Add(witwpt.DefaultProofLifetime)),
 				"jti": "jti-fixture-0001",
-				"wth": witwpt.WITThumbprint(witToken),
+				"wth": witwpt.WITHash(witToken),
 			})
 			if tt.proof != nil {
 				proof = tt.proof(t, f)
@@ -398,7 +398,7 @@ func TestVerifyRejections(t *testing.T) {
 }
 
 func TestVerifyValidatesTheWITBeforeTheProof(t *testing.T) {
-	// With both tokens broken, the WIT failure is reported (wpt-01 ordering).
+	// With both tokens broken, the WIT failure is reported (wpt-02 ordering).
 	f := newVerifyFixture(t)
 
 	expiredWIT := makeWIT(t, f.authority, "authority-1", f.id, f.cnfKey.Public(),

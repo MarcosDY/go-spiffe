@@ -17,7 +17,7 @@ const minSweepSize = 128
 const maxSweepInterval = time.Minute
 
 // ReplayCache records seen proofs so one cannot be presented twice within its
-// lifetime (wpt-01 §2). Records are keyed on the SPIFFE ID and the WPT's jti.
+// lifetime (wpt-02 §2). Records are keyed on the SPIFFE ID and the WPT's jti.
 type ReplayCache interface {
 	// CheckAndRecord atomically records the proof identified by id and jti. It
 	// returns ErrReplayed if the pair is already recorded, and any other error
